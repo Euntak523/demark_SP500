@@ -1,0 +1,36 @@
+name: Daily DeMark Analysis
+
+on:
+  schedule:
+    - cron: '5 21 * * *'  # 매일 UTC 21:05 = 한국시간 06:05
+  workflow_dispatch:
+
+jobs:
+  run-demark-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas lxml
+
+      - name: Run analysis script
+        run: |
+          python analyze_and_save.py
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add daily_result_*.csv
+          git commit -m "자동 분석 결과 저장: $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git push
