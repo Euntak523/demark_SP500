@@ -86,7 +86,8 @@ def run_analysis():
             })
 
     df = pd.DataFrame(results)
-    df = df.sort_values(by="시총_RAW", ascending=False)
+    if "시총_RAW" in df.columns:
+        df = df.sort_values(by="시총_RAW", ascending=False)
     filename = f"daily_result_{datetime.today().strftime('%Y%m%d')}.csv"
     df.to_csv(filename, index=False)
     print(f"✅ 분석 완료. {filename} 저장됨")
