@@ -82,7 +82,7 @@ def current_demark_status(symbol):
     return status, df, setup_direction
 
 # Streamlit 앱 시작
-st.title("📊 S&P 500 DeMark Setup + Countdown 자동 분석기")
+st.title("\ud83d\udcca S&P 500 DeMark Setup + Countdown 자동 분석기")
 
 if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
@@ -130,14 +130,23 @@ if len(st.session_state.setup_results) > 0:
     if selected_sector != "전체":
         df_result = df_result[df_result["업종"] == selected_sector]
 
-    st.dataframe(df_result.drop(columns=["시총_RAW"]))
+    # 종목 선택 및 차트 연동
+    selected_row = st.data_editor(
+        df_result.drop(columns=["시총_RAW"]),
+        use_container_width=True,
+        num_rows="dynamic",
+        key="종목표",
+        hide_index=True
+    )
 
-    if not df_result.empty:
-        selected_symbol = st.selectbox("차트를 보고 싶은 종목을 선택하세요:", df_result["종목"].tolist(),
-                                       index=df_result["종목"].tolist().index(st.session_state.selected_symbol)
-                                       if st.session_state.selected_symbol in df_result["종목"].tolist() else 0)
+    selected_symbol = None
+    if isinstance(selected_row, pd.DataFrame) and not selected_row.empty:
+        selected_symbol = selected_row.iloc[0]["종목"]
         st.session_state.selected_symbol = selected_symbol
+    else:
+        selected_symbol = st.session_state.selected_symbol
 
+    if selected_symbol:
         status, df, direction = current_demark_status(selected_symbol)
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(df.index, df['Close'], label='Close Price')
