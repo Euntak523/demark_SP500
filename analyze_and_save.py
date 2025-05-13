@@ -86,11 +86,14 @@ def run_analysis():
             })
 
     df = pd.DataFrame(results)
-    if "시총_RAW" in df.columns:
-        df = df.sort_values(by="시총_RAW", ascending=False)
-    filename = f"daily_result_{datetime.today().strftime('%Y%m%d')}.csv"
-    df.to_csv(filename, index=False)
-    print(f"✅ 분석 완료. {filename} 저장됨")
+    if not df.empty:
+        if "시총_RAW" in df.columns:
+            df = df.sort_values(by="시총_RAW", ascending=False)
+        filename = f"daily_result_{datetime.today().strftime('%Y%m%d')}.csv"
+        df.to_csv(filename, index=False)
+        print(f"✅ 분석 완료. {filename} 저장됨")
+    else:
+        print("⚠️ 분석된 종목이 없어 파일을 저장하지 않았습니다.")
 
 if __name__ == "__main__":
     run_analysis()
