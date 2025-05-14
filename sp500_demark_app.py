@@ -82,7 +82,7 @@ def current_demark_status(symbol):
 def backtest_countdown13(df):
     if df is None or 13 not in df['Countdown'].values:
         return "백테스트 불가"
-    
+
     entry_index = df[df['Countdown'] == 13].index[-1]
     try:
         entry_price = df.loc[entry_index, 'Close']
@@ -94,7 +94,7 @@ def backtest_countdown13(df):
     except:
         return "백테스트 계산 실패"
 
-# Streamlit 시작
+# 앱 시작
 st.set_page_config(layout="wide")
 st.title("📊 S&P 500 DeMark + 이동평균선 + 백테스트 자동 분석기")
 
@@ -153,44 +153,51 @@ if len(st.session_state.setup_results) > 0:
         fit_columns_on_grid_load=True
     )
 
-    if grid_response is not None and "selected_rows" in grid_response and len(grid_response["selected_rows"]) > 0:
-        selected_row = grid_response["selected_rows"][0]
-        
-        # 안전하게 Key 확인
-        selected_symbol = selected_row.get("Symbol") or selected_row.get("종목")
+    if (
+        grid_response is not None and
+        "selected_rows" in grid_response and
+        len(grid_response["selected_rows"]) > 0
+    ):
+        try:
+            # ✅ 이 부분이 핵심 수정!
+            selected_row_df = pd.DataFrame(grid_response["selected_rows"])
+            selected_row = selected_row_df.iloc[0]
+            selected_symbol = selected_row.get("Symbol") or selected_row.get("종목")
 
-        if not selected_symbol:
-            st.error("❌ 선택한 행에서 'Symbol' 값을 찾을 수 없습니다.")
-        else:
-            st.markdown(f"### {selected_symbol} 차트 및 백테스트")
-            status, df, direction = current_demark_status(selected_symbol)
-
-            if df is not None:
-                df['MA20'] = df['Close'].rolling(window=20).mean()
-                df['MA60'] = df['Close'].rolling(window=60).mean()
-                df['MA120'] = df['Close'].rolling(window=120).mean()
-
-                fig, ax = plt.subplots(figsize=(12, 5))
-                ax.plot(df.index, df['Close'], label='Close Price', linewidth=1.2)
-                ax.plot(df.index, df['MA20'], label='MA20', linestyle='--')
-                ax.plot(df.index, df['MA60'], label='MA60', linestyle=':')
-                ax.plot(df.index, df['MA120'], label='MA120', linestyle='-.', alpha=0.8)
-
-                setup_df = df[df['Setup'].notnull()]
-                ax.scatter(setup_df.index, setup_df['Close'], color='orange', label=f"Setup 9 ({direction})", marker='o')
-
-                if 13 in df['Countdown'].values:
-                    countdown_13 = df[df['Countdown'] == 13]
-                    ax.scatter(countdown_13.index, countdown_13['Close'], color='red', label="Countdown 13", marker='x')
-
-                ax.legend()
-                ax.set_title(f"{selected_symbol} DeMark 분석 + 이동평균선")
-                st.pyplot(fig)
-
-                result = backtest_countdown13(df)
-                st.markdown(f"#### 📊 백테스트 결과: {result}")
+            if not selected_symbol:
+                st.error("❌ 선택한 행에서 Symbol 값을 찾을 수 없습니다.")
             else:
-                st.warning("해당 종목의 데이터가 부족합니다.")
+                st.markdown(f"### {selected_symbol} 차트 및 백테스트")
+                status, df, direction = current_demark_status(selected_symbol)
+
+                if df is not None:
+                    df['MA20'] = df['Close'].rolling(window=20).mean()
+                    df['MA60'] = df['Close'].rolling(window=60).mean()
+                    df['MA120'] = df['Close'].rolling(window=120).mean()
+
+                    fig, ax = plt.subplots(figsize=(12, 5))
+                    ax.plot(df.index, df['Close'], label='Close Price', linewidth=1.2)
+                    ax.plot(df.index, df['MA20'], label='MA20', linestyle='--')
+                    ax.plot(df.index, df['MA60'], label='MA60', linestyle=':')
+                    ax.plot(df.index, df['MA120'], label='MA120', linestyle='-.', alpha=0.8)
+
+                    setup_df = df[df['Setup'].notnull()]
+                    ax.scatter(setup_df.index, setup_df['Close'], color='orange', label=f"Setup 9 ({direction})", marker='o')
+
+                    if 13 in df['Countdown'].values:
+                        countdown_13 = df[df['Countdown'] == 13]
+                        ax.scatter(countdown_13.index, countdown_13['Close'], color='red', label="Countdown 13", marker='x')
+
+                    ax.legend()
+                    ax.set_title(f"{selected_symbol} DeMark 분석 + 이동평균선")
+                    st.pyplot(fig)
+
+                    result = backtest_countdown13(df)
+                    st.markdown(f"#### 📊 백테스트 결과: {result}")
+                else:
+                    st.warning("해당 종목의 데이터가 부족합니다.")
+        except Exception as e:
+            st.error(f"선택 종목 처리 중 오류 발생: {e}")
     else:
         st.info("표에서 종목을 클릭하면 자동으로 차트가 표시됩니다.")
 else:
