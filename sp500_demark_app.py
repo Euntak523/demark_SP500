@@ -146,8 +146,8 @@ if len(st.session_state.setup_results) > 0:
         allow_unsafe_jscode=True
     )
 
-    # 클릭한 종목 자동 차트 표시
-    if grid_response["selected_rows"]:
+    # 선택된 종목이 있을 경우에만 안전하게 처리
+    if grid_response is not None and "selected_rows" in grid_response and len(grid_response["selected_rows"]) > 0:
         selected_symbol = grid_response["selected_rows"][0]["종목"]
         st.markdown(f"### {selected_symbol} 차트")
 
@@ -176,5 +176,7 @@ if len(st.session_state.setup_results) > 0:
             st.pyplot(fig)
         else:
             st.warning("해당 종목의 데이터가 부족합니다.")
+    else:
+        st.info("표에서 종목을 클릭하면 자동으로 차트가 표시됩니다.")
 else:
     st.warning("Setup 완료된 종목이 없습니다.")
