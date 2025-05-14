@@ -4,14 +4,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
-# S&P 500 종목 리스트 가져오기
 @st.cache_data(ttl=86400)
 def get_sp500_symbols():
     table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
     df = table[0]
     return df[['Symbol', 'GICS Sector']]
 
-# 시가총액 가져오기
 def get_market_cap(symbol):
     try:
         ticker = yf.Ticker(symbol)
@@ -23,7 +21,6 @@ def get_market_cap(symbol):
     except:
         return None, None
 
-# DeMark 분석 함수
 def current_demark_status(symbol):
     df = yf.download(symbol, period="6mo")
     if df.empty or len(df) < 30:
@@ -82,16 +79,31 @@ def current_demark_status(symbol):
 
     return status, df, setup_direction
 
-# Streamlit 앱 시작
+def backtest_countdown13(df):
+    # Countdown 13 시점 종가 기준, 이후 10거래일 후 수익률 측정
+    if df is None or 13 not in df['Countdown'].values:
+        return "백테스트 불가"
+    
+    entry_index = df[df['Countdown'] == 13].index[-1]
+    try:
+        entry_price = df.loc[entry_index, 'Close']
+        future_index = df.index.get_loc(entry_index) + 10
+        if future_index >= len(df):
+            return "10일 후 데이터 없음"
+        future_price = df.iloc[future_index]['Close']
+        return f"📈 10일 후 수익률: {(future_price - entry_price) / entry_price * 100:.2f}%"
+    except:
+        return "백테스트 계산 실패"
+
+# Streamlit 시작
 st.set_page_config(layout="wide")
-st.title("📊 S&P 500 DeMark + 이동평균선 자동 차트 앱")
+st.title("📊 S&P 500 DeMark + 이동평균선 + 백테스트 자동 분석기")
 
 if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
 if "df_result" not in st.session_state:
     st.session_state.df_result = pd.DataFrame()
 
-# 분석 시작 버튼
 if st.button("전체 S&P 500 분석 시작"):
     sp500_df = get_sp500_symbols()
     setup_results = []
@@ -105,51 +117,46 @@ if st.button("전체 S&P 500 분석 시작"):
                 if "Setup 미완료" not in status and status != "데이터 부족":
                     cap_raw, cap_str = get_market_cap(symbol)
                     setup_results.append({
-                        "종목": symbol,
-                        "상태": status,
-                        "방향": direction,
-                        "업종": sector,
-                        "시가총액": cap_str,
-                        "시총_RAW": cap_raw
+                        "Symbol": symbol,
+                        "Status": status,
+                        "Direction": direction,
+                        "Sector": sector,
+                        "MarketCap": cap_str,
+                        "MarketCap_RAW": cap_raw
                     })
             except:
                 continue
 
     if setup_results:
         df_result = pd.DataFrame(setup_results)
-        df_result = df_result.sort_values(by="시총_RAW", ascending=False)
+        df_result = df_result.sort_values(by="MarketCap_RAW", ascending=False)
         st.session_state.setup_results = setup_results
         st.session_state.df_result = df_result
         st.success(f"총 {len(df_result)}개 종목이 Setup 완료 상태입니다.")
 
-# 결과 출력
 if len(st.session_state.setup_results) > 0:
     df_result = st.session_state.df_result
 
-    # 업종 필터
-    sectors = df_result["업종"].dropna().unique().tolist()
+    sectors = df_result["Sector"].dropna().unique().tolist()
     selected_sector = st.selectbox("업종 필터링:", ["전체"] + sorted(sectors))
     if selected_sector != "전체":
-        df_result = df_result[df_result["업종"] == selected_sector]
+        df_result = df_result[df_result["Sector"] == selected_sector]
 
-    # AgGrid 구성
-    gb = GridOptionsBuilder.from_dataframe(df_result.drop(columns=["시총_RAW"]))
+    gb = GridOptionsBuilder.from_dataframe(df_result.drop(columns=["MarketCap_RAW"]))
     gb.configure_selection(selection_mode="single", use_checkbox=False)
     grid_options = gb.build()
 
     grid_response = AgGrid(
-        df_result.drop(columns=["시총_RAW"]),
+        df_result.drop(columns=["MarketCap_RAW"]),
         gridOptions=grid_options,
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         height=500,
-        fit_columns_on_grid_load=True,
-        allow_unsafe_jscode=True
+        fit_columns_on_grid_load=True
     )
 
-    # 선택된 종목이 있을 경우에만 안전하게 처리
     if grid_response is not None and "selected_rows" in grid_response and len(grid_response["selected_rows"]) > 0:
-        selected_symbol = grid_response["selected_rows"][0]["종목"]
-        st.markdown(f"### {selected_symbol} 차트")
+        selected_symbol = grid_response["selected_rows"][0]["Symbol"]
+        st.markdown(f"### {selected_symbol} 차트 및 백테스트")
 
         status, df, direction = current_demark_status(selected_symbol)
 
@@ -174,6 +181,9 @@ if len(st.session_state.setup_results) > 0:
             ax.legend()
             ax.set_title(f"{selected_symbol} DeMark 분석 + 이동평균선")
             st.pyplot(fig)
+
+            result = backtest_countdown13(df)
+            st.markdown(f"#### 📊 백테스트 결과: {result}")
         else:
             st.warning("해당 종목의 데이터가 부족합니다.")
     else:
