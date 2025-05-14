@@ -22,7 +22,7 @@ def get_market_cap(symbol):
     except:
         return None, None
 
-# DeMark 분석
+# DeMark 분석 함수
 def current_demark_status(symbol):
     df = yf.download(symbol, period="3mo")
     if df.empty or len(df) < 30:
@@ -68,7 +68,7 @@ def current_demark_status(symbol):
     elif countdown_count > 0:
         status = f"Countdown {countdown_count}/13"
     else:
-        status = "Countdown 시작 전"
+        status = "Setup 완료 (Countdown 시작 전)"
 
     return status, df, "하락"
 
@@ -85,7 +85,8 @@ if st.button("전체 분석 시작"):
             sector = row['GICS Sector']
             try:
                 status, _, direction = current_demark_status(symbol)
-                if "Setup" in status and "미완료" not in status:
+                print(symbol, status)
+                if ("Setup" in status or "Countdown" in status) and "미완료" not in status and status != "데이터 부족":
                     cap_raw, cap_str = get_market_cap(symbol)
                     results.append({
                         "종목": symbol,
@@ -135,4 +136,4 @@ if st.button("전체 분석 시작"):
             ax.set_title(f"{selected_symbol} DeMark 차트")
             st.pyplot(fig)
     else:
-        st.warning("조건에 맞는 종목이 없습니다.")
+        st.warning("Setup이 완료된 종목이 없습니다. 다시 시도하거나 조건을 완화해 보세요.")
