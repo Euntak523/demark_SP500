@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # S&P 500 종목 리스트 가져오기 (캐싱, 하루 1회)
 @st.cache_data(ttl=86400)
@@ -24,7 +25,7 @@ def get_market_cap(symbol):
 
 # DeMark 분석 함수
 def current_demark_status(symbol):
-    df = yf.download(symbol, period="3mo")
+    df = yf.download(symbol, period="6mo")  # 충분한 데이터 확보
     if df.empty or len(df) < 30:
         return "데이터 부족", None, None
 
@@ -82,7 +83,8 @@ def current_demark_status(symbol):
     return status, df, setup_direction
 
 # Streamlit 앱 시작
-st.title("📊 S&P 500 DeMark Setup + Countdown 자동 분석기")
+st.set_page_config(layout="wide")
+st.title("📊 S&P 500 DeMark Setup + Countdown + 이동평균선 분석기")
 
 if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
@@ -91,6 +93,7 @@ if "df_result" not in st.session_state:
 if "selected_symbol" not in st.session_state:
     st.session_state.selected_symbol = None
 
+# 전체 분석 버튼
 if st.button("전체 S&P 500 분석 시작"):
     sp500_df = get_sp500_symbols()
     setup_results = []
@@ -121,6 +124,7 @@ if st.button("전체 S&P 500 분석 시작"):
         st.session_state.df_result = df_result
         st.success(f"총 {len(df_result)}개 종목이 Setup 완료 상태입니다.")
 
+# 분석 결과 처리
 if len(st.session_state.setup_results) > 0:
     df_result = st.session_state.df_result
 
@@ -130,20 +134,38 @@ if len(st.session_state.setup_results) > 0:
     if selected_sector != "전체":
         df_result = df_result[df_result["업종"] == selected_sector]
 
-    st.dataframe(df_result.drop(columns=["시총_RAW"]))
+    # 종목 리스트를 AgGrid로 출력
+    gb = GridOptionsBuilder.from_dataframe(df_result.drop(columns=["시총_RAW"]))
+    gb.configure_selection(selection_mode="single", use_checkbox=False)
+    grid_options = gb.build()
 
-    # 종목 선택 시 자동 차트 표시
-    if not df_result.empty:
-        selected_symbol = st.selectbox("차트를 보고 싶은 종목을 선택하세요:", df_result["종목"].tolist(),
-                                       index=df_result["종목"].tolist().index(st.session_state.selected_symbol)
-                                       if st.session_state.selected_symbol in df_result["종목"].tolist() else 0)
+    grid_response = AgGrid(
+        df_result.drop(columns=["시총_RAW"]),
+        gridOptions=grid_options,
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        height=500,
+        fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True
+    )
+
+    # 선택된 종목에 대한 차트 출력
+    if grid_response["selected_rows"]:
+        selected_symbol = grid_response["selected_rows"][0]["종목"]
         st.session_state.selected_symbol = selected_symbol
 
         status, df, direction = current_demark_status(selected_symbol)
 
         if df is not None:
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(df.index, df['Close'], label='Close Price')
+            # 이동평균선 계산
+            df['MA20'] = df['Close'].rolling(window=20).mean()
+            df['MA60'] = df['Close'].rolling(window=60).mean()
+            df['MA120'] = df['Close'].rolling(window=120).mean()
+
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ax.plot(df.index, df['Close'], label='Close Price', linewidth=1.2)
+            ax.plot(df.index, df['MA20'], label='MA20', linestyle='--')
+            ax.plot(df.index, df['MA60'], label='MA60', linestyle=':')
+            ax.plot(df.index, df['MA120'], label='MA120', linestyle='-.', alpha=0.8)
 
             setup_df = df[df['Setup'].notnull()]
             ax.scatter(setup_df.index, setup_df['Close'], color='orange', label=f"Setup 9 ({direction})", marker='o')
@@ -153,7 +175,7 @@ if len(st.session_state.setup_results) > 0:
                 ax.scatter(countdown_13.index, countdown_13['Close'], color='red', label="Countdown 13", marker='x')
 
             ax.legend()
-            ax.set_title(f"{selected_symbol} DeMark 분석 결과")
+            ax.set_title(f"{selected_symbol} DeMark 분석 + 이동평균선")
             st.pyplot(fig)
         else:
             st.warning("해당 종목의 데이터가 부족합니다.")
