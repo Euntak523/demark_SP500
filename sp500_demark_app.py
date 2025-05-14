@@ -4,14 +4,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
-# S&P 500 종목 리스트 가져오기 (캐싱, 하루 1회)
+# S&P 500 종목 리스트 가져오기
 @st.cache_data(ttl=86400)
 def get_sp500_symbols():
     table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
     df = table[0]
     return df[['Symbol', 'GICS Sector']]
 
-# 시가총액 가져오기 및 단위 변환
+# 시가총액 가져오기
 def get_market_cap(symbol):
     try:
         ticker = yf.Ticker(symbol)
@@ -25,7 +25,7 @@ def get_market_cap(symbol):
 
 # DeMark 분석 함수
 def current_demark_status(symbol):
-    df = yf.download(symbol, period="6mo")  # 충분한 데이터 확보
+    df = yf.download(symbol, period="6mo")
     if df.empty or len(df) < 30:
         return "데이터 부족", None, None
 
@@ -84,21 +84,19 @@ def current_demark_status(symbol):
 
 # Streamlit 앱 시작
 st.set_page_config(layout="wide")
-st.title("📊 S&P 500 DeMark Setup + Countdown + 이동평균선 분석기")
+st.title("📊 S&P 500 DeMark + 이동평균선 자동 차트 앱")
 
 if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
 if "df_result" not in st.session_state:
     st.session_state.df_result = pd.DataFrame()
-if "selected_symbol" not in st.session_state:
-    st.session_state.selected_symbol = None
 
-# 전체 분석 버튼
+# 분석 시작 버튼
 if st.button("전체 S&P 500 분석 시작"):
     sp500_df = get_sp500_symbols()
     setup_results = []
 
-    with st.spinner("분석 중입니다. 잠시만 기다려 주세요..."):
+    with st.spinner("분석 중입니다..."):
         for _, row in sp500_df.iterrows():
             symbol = row['Symbol']
             sector = row['GICS Sector']
@@ -124,17 +122,17 @@ if st.button("전체 S&P 500 분석 시작"):
         st.session_state.df_result = df_result
         st.success(f"총 {len(df_result)}개 종목이 Setup 완료 상태입니다.")
 
-# 분석 결과 처리
+# 결과 출력
 if len(st.session_state.setup_results) > 0:
     df_result = st.session_state.df_result
 
     # 업종 필터
     sectors = df_result["업종"].dropna().unique().tolist()
-    selected_sector = st.selectbox("업종으로 필터링:", ["전체"] + sorted(sectors))
+    selected_sector = st.selectbox("업종 필터링:", ["전체"] + sorted(sectors))
     if selected_sector != "전체":
         df_result = df_result[df_result["업종"] == selected_sector]
 
-    # 종목 리스트를 AgGrid로 출력
+    # AgGrid 구성
     gb = GridOptionsBuilder.from_dataframe(df_result.drop(columns=["시총_RAW"]))
     gb.configure_selection(selection_mode="single", use_checkbox=False)
     grid_options = gb.build()
@@ -148,15 +146,14 @@ if len(st.session_state.setup_results) > 0:
         allow_unsafe_jscode=True
     )
 
-    # 선택된 종목에 대한 차트 출력
+    # 클릭한 종목 자동 차트 표시
     if grid_response["selected_rows"]:
         selected_symbol = grid_response["selected_rows"][0]["종목"]
-        st.session_state.selected_symbol = selected_symbol
+        st.markdown(f"### {selected_symbol} 차트")
 
         status, df, direction = current_demark_status(selected_symbol)
 
         if df is not None:
-            # 이동평균선 계산
             df['MA20'] = df['Close'].rolling(window=20).mean()
             df['MA60'] = df['Close'].rolling(window=60).mean()
             df['MA120'] = df['Close'].rolling(window=120).mean()
