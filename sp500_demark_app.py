@@ -21,20 +21,17 @@ def get_market_cap(symbol):
     except:
         return None, None
 
-def current_demark_status(symbol):
+def current_demark_setup(symbol):
     df = yf.download(symbol, period="6mo")
     if df.empty or len(df) < 30:
         return "데이터 부족", None, None
 
     df = df.copy()
     df['Close-4'] = df['Close'].shift(4)
-    df['Close-2'] = df['Close'].shift(2)
     df['Setup'] = None
-    df['Countdown'] = 0
 
     setup_count = 0
-    setup_indices = []
-    setup_direction = None
+    setup_direction = "하락"
 
     for i in range(4, len(df)):
         try:
@@ -47,56 +44,18 @@ def current_demark_status(symbol):
             setup_count += 1
             if setup_count == 9:
                 df.loc[df.index[i], 'Setup'] = "하락"
-                setup_indices.append(i)
                 setup_count = 0
         else:
             setup_count = 0
 
-    if not setup_indices:
+    if df['Setup'].isnull().all():
         return "최근 90일 기준 Setup 미완료", df, None
 
-    setup_done_index = setup_indices[-1]
-    setup_direction = "하락"
-
-    countdown_count = 0
-    for j in range(setup_done_index + 1, len(df)):
-        try:
-            close = float(df.iloc[j]['Close'])
-            close_2 = float(df.iloc[j]['Close-2'])
-        except:
-            continue
-
-        if close < close_2:
-            countdown_count += 1
-            df.loc[df.index[j], 'Countdown'] = countdown_count
-
-    if countdown_count >= 13:
-        status = "Countdown 13 (Signal)"
-    elif countdown_count > 0:
-        status = f"Countdown {countdown_count}/13"
-    else:
-        status = "Countdown 시작 전"
-
-    return status, df, setup_direction
-
-def backtest_countdown13(df):
-    if df is None or 13 not in df['Countdown'].values:
-        return "백테스트 불가"
-
-    entry_index = df[df['Countdown'] == 13].index[-1]
-    try:
-        entry_price = df.loc[entry_index, 'Close']
-        future_index = df.index.get_loc(entry_index) + 10
-        if future_index >= len(df):
-            return "10일 후 데이터 없음"
-        future_price = df.iloc[future_index]['Close']
-        return f"📈 10일 후 수익률: {(future_price - entry_price) / entry_price * 100:.2f}%"
-    except:
-        return "백테스트 계산 실패"
+    return "Setup 9 완료", df, setup_direction
 
 # 앱 시작
 st.set_page_config(layout="wide")
-st.title("📊 S&P 500 DeMark + 이동평균선 + 백테스트 자동 분석기")
+st.title("📊 S&P 500 DeMark Setup 자동 분석기")
 
 if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
@@ -112,7 +71,7 @@ if st.button("전체 S&P 500 분석 시작"):
             symbol = row['Symbol']
             sector = row['GICS Sector']
             try:
-                status, df, direction = current_demark_status(symbol)
+                status, df, direction = current_demark_setup(symbol)
                 if "Setup 미완료" not in status and status != "데이터 부족":
                     cap_raw, cap_str = get_market_cap(symbol)
                     setup_results.append({
@@ -159,7 +118,6 @@ if len(st.session_state.setup_results) > 0:
         len(grid_response["selected_rows"]) > 0
     ):
         try:
-            # ✅ 이 부분이 핵심 수정!
             selected_row_df = pd.DataFrame(grid_response["selected_rows"])
             selected_row = selected_row_df.iloc[0]
             selected_symbol = selected_row.get("Symbol") or selected_row.get("종목")
@@ -167,8 +125,8 @@ if len(st.session_state.setup_results) > 0:
             if not selected_symbol:
                 st.error("❌ 선택한 행에서 Symbol 값을 찾을 수 없습니다.")
             else:
-                st.markdown(f"### {selected_symbol} 차트 및 백테스트")
-                status, df, direction = current_demark_status(selected_symbol)
+                st.markdown(f"### {selected_symbol} 차트")
+                status, df, direction = current_demark_setup(selected_symbol)
 
                 if df is not None:
                     df['MA20'] = df['Close'].rolling(window=20).mean()
@@ -184,16 +142,9 @@ if len(st.session_state.setup_results) > 0:
                     setup_df = df[df['Setup'].notnull()]
                     ax.scatter(setup_df.index, setup_df['Close'], color='orange', label=f"Setup 9 ({direction})", marker='o')
 
-                    if 13 in df['Countdown'].values:
-                        countdown_13 = df[df['Countdown'] == 13]
-                        ax.scatter(countdown_13.index, countdown_13['Close'], color='red', label="Countdown 13", marker='x')
-
                     ax.legend()
-                    ax.set_title(f"{selected_symbol} DeMark 분석 + 이동평균선")
+                    ax.set_title(f"{selected_symbol} DeMark Setup 분석 + 이동평균선")
                     st.pyplot(fig)
-
-                    result = backtest_countdown13(df)
-                    st.markdown(f"#### 📊 백테스트 결과: {result}")
                 else:
                     st.warning("해당 종목의 데이터가 부족합니다.")
         except Exception as e:
@@ -202,3 +153,4 @@ if len(st.session_state.setup_results) > 0:
         st.info("표에서 종목을 클릭하면 자동으로 차트가 표시됩니다.")
 else:
     st.warning("Setup 완료된 종목이 없습니다.")
+
