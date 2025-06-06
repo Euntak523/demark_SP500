@@ -31,6 +31,7 @@ def current_demark_setup(symbol):
     df['Setup'] = None
 
     setup_count = 0
+    setup_index = 0
     setup_direction = "하락"
 
     for i in range(4, len(df)):
@@ -43,7 +44,8 @@ def current_demark_setup(symbol):
         if close < close_4:
             setup_count += 1
             if setup_count == 9:
-                df.loc[df.index[i], 'Setup'] = "하락"
+                setup_index += 1
+                df.loc[df.index[i], 'Setup'] = f"Setup {setup_index}번째 완료"
                 setup_count = 0
         else:
             setup_count = 0
@@ -51,7 +53,7 @@ def current_demark_setup(symbol):
     if df['Setup'].isnull().all():
         return "최근 90일 기준 Setup 미완료", df, None
 
-    return "Setup 9 완료", df, setup_direction
+    return f"총 {setup_index}개 Setup 완료", df, setup_direction
 
 # 앱 시작
 st.set_page_config(layout="wide")
@@ -140,7 +142,7 @@ if len(st.session_state.setup_results) > 0:
                     ax.plot(df.index, df['MA120'], label='MA120', linestyle='-.', alpha=0.8)
 
                     setup_df = df[df['Setup'].notnull()]
-                    ax.scatter(setup_df.index, setup_df['Close'], color='orange', label=f"Setup 9 ({direction})", marker='o')
+                    ax.scatter(setup_df.index, setup_df['Close'], color='orange', label="Setup 9 완료", marker='o')
 
                     ax.legend()
                     ax.set_title(f"{selected_symbol} DeMark Setup 분석 + 이동평균선")
@@ -153,4 +155,3 @@ if len(st.session_state.setup_results) > 0:
         st.info("표에서 종목을 클릭하면 자동으로 차트가 표시됩니다.")
 else:
     st.warning("Setup 완료된 종목이 없습니다.")
-
