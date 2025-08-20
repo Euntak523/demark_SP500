@@ -69,6 +69,8 @@ if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
 if "df_result" not in st.session_state:
     st.session_state.df_result = pd.DataFrame()
+if "last_selection" not in st.session_state:
+    st.session_state.last_selection = []
 
 # -----------------------------
 # 전체 분석 버튼
@@ -120,10 +122,17 @@ if len(st.session_state.setup_results) > 0:
         st.warning("표시할 결과가 없습니다.")
         st.stop()
 
-    # 그리드
+    # 그리드 (모바일/태블릿 안정화를 위해 체크박스 선택 사용)
     display_df = df_result.drop(columns=["MarketCap_RAW"])
     gb = GridOptionsBuilder.from_dataframe(display_df)
-    gb.configure_selection(selection_mode="single", use_checkbox=False)
+    gb.configure_selection(
+        selection_mode="single",
+        use_checkbox=True   # ← 터치에서도 확실히 선택되도록 체크박스 사용
+    )
+    gb.configure_grid_options(
+        suppressRowClickSelection=False,  # 행 클릭도 선택 허용
+        rowSelection="single"
+    )
     grid_options = gb.build()
 
     grid_response = AgGrid(
@@ -131,28 +140,34 @@ if len(st.session_state.setup_results) > 0:
         gridOptions=grid_options,
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         height=500,
-        fit_columns_on_grid_load=True
+        fit_columns_on_grid_load=True,
+        key="main_grid"
     )
 
-    # ✅ AgGrid 선택행 안전 처리 (dict가 아니어도 동작)
+    # ✅ 선택행 안전 처리 + 마지막 선택 복구
     try:
         rows = grid_response["selected_rows"] or []
     except Exception:
         rows = []
 
     if rows:
+        st.session_state.last_selection = rows
+    else:
+        rows = st.session_state.last_selection or []
+
+    if rows:
         try:
             selected_row_df = pd.DataFrame(rows)
             selected_row = selected_row_df.iloc[0]
-            selected_symbol = selected_row.get("Symbol") or selected_row.get("종목")
+            selected_symbol = (selected_row.get("Symbol")
+                               or selected_row.get("종목")
+                               or selected_row.get("symbol"))
 
             if not selected_symbol:
                 st.error("❌ 선택한 행에서 Symbol 값을 찾을 수 없습니다.")
             else:
                 st.markdown(f"### {selected_symbol} 차트")
                 status, df, direction = current_demark_setup(selected_symbol)
-                # 디버깅이 필요하면 아래 주석을 해제:
-                # st.write("상태:", status, "shape:", None if df is None else df.shape)
 
                 if df is not None and not df.empty:
                     df['MA20'] = df['Close'].rolling(window=20).mean()
@@ -172,11 +187,12 @@ if len(st.session_state.setup_results) > 0:
                     ax.legend()
                     ax.set_title(f"{selected_symbol} DeMark Setup 분석 + 이동평균선")
                     st.pyplot(fig)
+                    plt.close(fig)
                 else:
                     st.warning("해당 종목의 데이터가 부족합니다.")
         except Exception as e:
             st.error(f"선택 종목 처리 중 오류 발생: {e}")
     else:
-        st.info("표에서 종목을 클릭하면 자동으로 차트가 표시됩니다.")
+        st.info("표 왼쪽 체크박스를 선택하면 차트를 표시합니다. (모바일/터치 지원)")
 else:
     st.warning("Setup 완료된 종목이 없습니다.")
