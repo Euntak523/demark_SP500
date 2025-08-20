@@ -4,6 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
+# -----------------------------
+# 데이터 함수
+# -----------------------------
 @st.cache_data(ttl=86400)
 def get_sp500_symbols():
     table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
@@ -18,7 +21,7 @@ def get_market_cap(symbol):
         if cap is not None:
             return cap, f"{cap / 1_000_000_000:.2f}B"
         return None, None
-    except:
+    except Exception:
         return None, None
 
 def current_demark_setup(symbol):
@@ -32,13 +35,13 @@ def current_demark_setup(symbol):
 
     setup_count = 0
     setup_index = 0
-    setup_direction = "하락"
+    setup_direction = "하락"  # 현재 로직은 하락 Setup 기준
 
     for i in range(4, len(df)):
         try:
             close = float(df.iloc[i]['Close'])
             close_4 = float(df.iloc[i]['Close-4'])
-        except:
+        except Exception:
             continue
 
         if close < close_4:
@@ -55,15 +58,21 @@ def current_demark_setup(symbol):
 
     return f"총 {setup_index}개 Setup 완료", df, setup_direction
 
+# -----------------------------
 # 앱 시작
+# -----------------------------
 st.set_page_config(layout="wide")
 st.title("📊 S&P 500 DeMark Setup 자동 분석기")
 
+# 세션 초기화
 if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
 if "df_result" not in st.session_state:
     st.session_state.df_result = pd.DataFrame()
 
+# -----------------------------
+# 전체 분석 버튼
+# -----------------------------
 if st.button("전체 S&P 500 분석 시작"):
     sp500_df = get_sp500_symbols()
     setup_results = []
@@ -84,7 +93,7 @@ if st.button("전체 S&P 500 분석 시작"):
                         "MarketCap": cap_str,
                         "MarketCap_RAW": cap_raw
                     })
-            except:
+            except Exception:
                 continue
 
     if setup_results:
@@ -94,33 +103,45 @@ if st.button("전체 S&P 500 분석 시작"):
         st.session_state.df_result = df_result
         st.success(f"총 {len(df_result)}개 종목이 Setup 완료 상태입니다.")
 
+# -----------------------------
+# 결과 표 & 차트
+# -----------------------------
 if len(st.session_state.setup_results) > 0:
-    df_result = st.session_state.df_result
+    df_result = st.session_state.df_result.copy()
 
+    # 업종 필터
     sectors = df_result["Sector"].dropna().unique().tolist()
     selected_sector = st.selectbox("업종 필터링:", ["전체"] + sorted(sectors))
     if selected_sector != "전체":
         df_result = df_result[df_result["Sector"] == selected_sector]
 
-    gb = GridOptionsBuilder.from_dataframe(df_result.drop(columns=["MarketCap_RAW"]))
+    # 빈 DF 방어
+    if df_result.empty:
+        st.warning("표시할 결과가 없습니다.")
+        st.stop()
+
+    # 그리드
+    display_df = df_result.drop(columns=["MarketCap_RAW"])
+    gb = GridOptionsBuilder.from_dataframe(display_df)
     gb.configure_selection(selection_mode="single", use_checkbox=False)
     grid_options = gb.build()
 
     grid_response = AgGrid(
-        df_result.drop(columns=["MarketCap_RAW"]),
+        display_df,
         gridOptions=grid_options,
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         height=500,
         fit_columns_on_grid_load=True
     )
 
-    if (
-        grid_response is not None and
-        "selected_rows" in grid_response and
-        len(grid_response["selected_rows"]) > 0
-    ):
+    # ✅ 안전한 선택 행 처리
+    rows = []
+    if isinstance(grid_response, dict):
+        rows = grid_response.get("selected_rows") or []
+
+    if rows:
         try:
-            selected_row_df = pd.DataFrame(grid_response["selected_rows"])
+            selected_row_df = pd.DataFrame(rows)
             selected_row = selected_row_df.iloc[0]
             selected_symbol = selected_row.get("Symbol") or selected_row.get("종목")
 
@@ -130,7 +151,7 @@ if len(st.session_state.setup_results) > 0:
                 st.markdown(f"### {selected_symbol} 차트")
                 status, df, direction = current_demark_setup(selected_symbol)
 
-                if df is not None:
+                if df is not None and not df.empty:
                     df['MA20'] = df['Close'].rolling(window=20).mean()
                     df['MA60'] = df['Close'].rolling(window=60).mean()
                     df['MA120'] = df['Close'].rolling(window=120).mean()
@@ -142,7 +163,8 @@ if len(st.session_state.setup_results) > 0:
                     ax.plot(df.index, df['MA120'], label='MA120', linestyle='-.', alpha=0.8)
 
                     setup_df = df[df['Setup'].notnull()]
-                    ax.scatter(setup_df.index, setup_df['Close'], color='orange', label="Setup 9 완료", marker='o')
+                    if not setup_df.empty:
+                        ax.scatter(setup_df.index, setup_df['Close'], label="Setup 9 완료", marker='o')
 
                     ax.legend()
                     ax.set_title(f"{selected_symbol} DeMark Setup 분석 + 이동평균선")
