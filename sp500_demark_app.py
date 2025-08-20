@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # -----------------------------
-# 데이터 함수
+# 데이터/헬퍼 함수
 # -----------------------------
 @st.cache_data(ttl=86400)
 def get_sp500_symbols():
@@ -13,20 +13,20 @@ def get_sp500_symbols():
     df = table[0]
     return df[['Symbol', 'GICS Sector']]
 
-def get_market_cap(symbol):
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        cap = info.get("marketCap", None)
-        if cap is not None:
-            return cap, f"{cap / 1_000_000_000:.2f}B"
-        return None, None
-    except Exception:
-        return None, None
+def _download_retry(symbol, period="6mo", tries=3):
+    last_err = None
+    for _ in range(tries):
+        try:
+            df = yf.download(symbol, period=period, auto_adjust=False, progress=False, threads=False)
+            if df is not None and not df.empty:
+                return df
+        except Exception as e:
+            last_err = e
+    return None
 
 def current_demark_setup(symbol):
-    df = yf.download(symbol, period="6mo")
-    if df.empty or len(df) < 30:
+    df = _download_retry(symbol, period="6mo", tries=3)
+    if df is None or df.empty or len(df) < 30:
         return "데이터 부족", None, None
 
     df = df.copy()
@@ -58,6 +58,33 @@ def current_demark_setup(symbol):
 
     return f"총 {setup_index}개 Setup 완료", df, setup_direction
 
+def draw_chart_block(symbol):
+    """선택/자동심볼에 대해 차트 그리는 공통 블록"""
+    status, df, direction = current_demark_setup(symbol)
+    st.write("DEBUG-status:", status, "| shape:", None if df is None else df.shape)
+    if df is not None and not df.empty:
+        df = df.copy()
+        df['MA20'] = df['Close'].rolling(window=20).mean()
+        df['MA60'] = df['Close'].rolling(window=60).mean()
+        df['MA120'] = df['Close'].rolling(window=120).mean()
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(df.index, df['Close'], label='Close', linewidth=1.2)
+        ax.plot(df.index, df['MA20'], label='MA20', linestyle='--')
+        ax.plot(df.index, df['MA60'], label='MA60', linestyle=':')
+        ax.plot(df.index, df['MA120'], label='MA120', linestyle='-.', alpha=0.8)
+
+        setup_df = df[df['Setup'].notnull()]
+        if not setup_df.empty:
+            ax.scatter(setup_df.index, setup_df['Close'], label="Setup 9 완료", marker='o')
+
+        ax.legend()
+        ax.set_title(f"{symbol} DeMark Setup 분석 + 이동평균선")
+        st.pyplot(fig)
+        plt.close(fig)
+    else:
+        st.warning("해당 종목의 데이터가 부족합니다.")
+
 # -----------------------------
 # 앱 시작
 # -----------------------------
@@ -86,21 +113,27 @@ if st.button("전체 S&P 500 분석 시작"):
             try:
                 status, df, direction = current_demark_setup(symbol)
                 if "Setup 미완료" not in status and status != "데이터 부족":
-                    cap_raw, cap_str = get_market_cap(symbol)
+                    # 시총(선택)
+                    try:
+                        info = yf.Ticker(symbol).info
+                        cap = info.get("marketCap")
+                        cap_str = f"{cap / 1_000_000_000:.2f}B" if cap else None
+                    except Exception:
+                        cap, cap_str = None, None
+
                     setup_results.append({
                         "Symbol": symbol,
                         "Status": status,
                         "Direction": direction,
                         "Sector": sector,
                         "MarketCap": cap_str,
-                        "MarketCap_RAW": cap_raw
+                        "MarketCap_RAW": cap
                     })
             except Exception:
                 continue
 
     if setup_results:
-        df_result = pd.DataFrame(setup_results)
-        df_result = df_result.sort_values(by="MarketCap_RAW", ascending=False)
+        df_result = pd.DataFrame(setup_results).sort_values(by="MarketCap_RAW", ascending=False, na_position="last")
         st.session_state.setup_results = setup_results
         st.session_state.df_result = df_result
         st.success(f"총 {len(df_result)}개 종목이 Setup 완료 상태입니다.")
@@ -122,17 +155,11 @@ if len(st.session_state.setup_results) > 0:
         st.warning("표시할 결과가 없습니다.")
         st.stop()
 
-    # 그리드 (모바일/태블릿 안정화를 위해 체크박스 선택 사용)
+    # 그리드 (모바일/터치 안정: 체크박스 선택)
     display_df = df_result.drop(columns=["MarketCap_RAW"])
     gb = GridOptionsBuilder.from_dataframe(display_df)
-    gb.configure_selection(
-        selection_mode="single",
-        use_checkbox=True   # ← 터치에서도 확실히 선택되도록 체크박스 사용
-    )
-    gb.configure_grid_options(
-        suppressRowClickSelection=False,  # 행 클릭도 선택 허용
-        rowSelection="single"
-    )
+    gb.configure_selection(selection_mode="single", use_checkbox=True)  # 체크박스 사용
+    gb.configure_grid_options(suppressRowClickSelection=False, rowSelection="single")
     grid_options = gb.build()
 
     grid_response = AgGrid(
@@ -143,6 +170,28 @@ if len(st.session_state.setup_results) > 0:
         fit_columns_on_grid_load=True,
         key="main_grid"
     )
+
+    # ================== 🔎 진단 패널 (표 바로 아래) ==================
+    with st.expander("🔎 진단 패널", expanded=True):
+        try:
+            _rows_dbg = grid_response["selected_rows"] or []
+        except Exception:
+            _rows_dbg = []
+        st.write("DEBUG-selected_rows:", _rows_dbg)
+
+        if _rows_dbg:
+            _sr_dbg = pd.DataFrame(_rows_dbg).iloc[0]
+            _sym_dbg = (_sr_dbg.get("Symbol") or _sr_dbg.get("종목") or _sr_dbg.get("symbol") or _sr_dbg.get("티커"))
+        else:
+            _sym_dbg = None
+        st.write("DEBUG-selected_symbol:", _sym_dbg)
+
+        test_symbol = st.text_input("테스트 심볼(AAPL, MSFT 등)", "AAPL")
+        if st.button("강제 차트 테스트"):
+            draw_chart_block(test_symbol)
+
+        st.write("DEBUG-env: pandas", pd.__version__)
+    # ============================================================
 
     # ✅ 선택행 안전 처리 + 마지막 선택 복구
     try:
@@ -155,44 +204,30 @@ if len(st.session_state.setup_results) > 0:
     else:
         rows = st.session_state.last_selection or []
 
+    # 차트 표시
     if rows:
         try:
             selected_row_df = pd.DataFrame(rows)
             selected_row = selected_row_df.iloc[0]
-            selected_symbol = (selected_row.get("Symbol")
-                               or selected_row.get("종목")
-                               or selected_row.get("symbol"))
+            selected_symbol = (
+                selected_row.get("Symbol")
+                or selected_row.get("종목")
+                or selected_row.get("symbol")
+                or selected_row.get("티커")
+            )
 
             if not selected_symbol:
                 st.error("❌ 선택한 행에서 Symbol 값을 찾을 수 없습니다.")
             else:
                 st.markdown(f"### {selected_symbol} 차트")
-                status, df, direction = current_demark_setup(selected_symbol)
-
-                if df is not None and not df.empty:
-                    df['MA20'] = df['Close'].rolling(window=20).mean()
-                    df['MA60'] = df['Close'].rolling(window=60).mean()
-                    df['MA120'] = df['Close'].rolling(window=120).mean()
-
-                    fig, ax = plt.subplots(figsize=(12, 5))
-                    ax.plot(df.index, df['Close'], label='Close Price', linewidth=1.2)
-                    ax.plot(df.index, df['MA20'], label='MA20', linestyle='--')
-                    ax.plot(df.index, df['MA60'], label='MA60', linestyle=':')
-                    ax.plot(df.index, df['MA120'], label='MA120', linestyle='-.', alpha=0.8)
-
-                    setup_df = df[df['Setup'].notnull()]
-                    if not setup_df.empty:
-                        ax.scatter(setup_df.index, setup_df['Close'], label="Setup 9 완료", marker='o')
-
-                    ax.legend()
-                    ax.set_title(f"{selected_symbol} DeMark Setup 분석 + 이동평균선")
-                    st.pyplot(fig)
-                    plt.close(fig)
-                else:
-                    st.warning("해당 종목의 데이터가 부족합니다.")
+                draw_chart_block(selected_symbol)
         except Exception as e:
             st.error(f"선택 종목 처리 중 오류 발생: {e}")
     else:
-        st.info("표 왼쪽 체크박스를 선택하면 차트를 표시합니다. (모바일/터치 지원)")
+        # 선택이 감지되지 않을 때 첫 행 자동 표시 (무반응 방지용)
+        auto_symbol = display_df.iloc[0]["Symbol"]
+        st.info(f"선택이 감지되지 않아 첫 종목({auto_symbol}) 차트를 자동 표시합니다.")
+        st.markdown(f"### {auto_symbol} 차트 (자동)")
+        draw_chart_block(auto_symbol)
 else:
     st.warning("Setup 완료된 종목이 없습니다.")
