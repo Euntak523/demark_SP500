@@ -104,7 +104,7 @@ if st.button("전체 S&P 500 분석 시작"):
             try:
                 status, df, direction = current_demark_setup(sym)
                 if "Setup 미완료" not in status and status != "데이터 부족":
-                    # 시총(옵션)
+                    # (선택) 시총 – 실패해도 무시
                     try:
                         info = yf.Ticker(sym).info
                         cap = info.get("marketCap")
@@ -126,7 +126,7 @@ if st.button("전체 S&P 500 분석 시작"):
         df = pd.DataFrame(results).sort_values(by="MarketCap_RAW", ascending=False, na_position="last")
         st.session_state.df_result = df
         st.session_state.setup_results = results
-        st.session_state.symbol_select = df.iloc[0]["Symbol"]  # 기본 선택값
+        st.session_state.symbol_select = df.iloc[0]["Symbol"]  # 기본 선택
         st.success(f"총 {len(df)}개 종목이 Setup 완료 상태입니다.")
 
 # 결과 표시
@@ -146,36 +146,24 @@ if df_result.empty:
     st.warning("필터 결과가 비어 있습니다.")
     st.stop()
 
-# 표 (AgGrid 선택 이벤트 안정화 구성)
+# 표 (AgGrid – 문제 옵션 모두 제거, 최소 구성)
 display_df = df_result.drop(columns=["MarketCap_RAW"])
 gb = GridOptionsBuilder.from_dataframe(display_df)
-
-# 체크박스 단일 선택 + 터치 대응
-gb.configure_selection(
-    selection_mode="single",
-    use_checkbox=True,
-    groupSelectsChildren=False,
-    groupSelectsFiltered=True,
-)
-# 고유 RowID를 심볼로 지정(선택 유지/전달 안정화)
-gb.configure_grid_options(
-    rowSelection="single",
-    suppressRowClickSelection=False,
-    getRowId="""function(params){ return params.data.Symbol; }"""
-)
+gb.configure_selection(selection_mode="single", use_checkbox=True)   # 체크박스 단일 선택
+gb.configure_grid_options(rowSelection="single", suppressRowClickSelection=False)
 grid_options = gb.build()
 
 grid_response = AgGrid(
     display_df,
     gridOptions=grid_options,
-    update_mode=GridUpdateMode.MODEL_CHANGED,                 # 모델 변화 전부 이벤트
-    data_return_mode=DataReturnMode.FILTERED_AND_SORTED,      # 필터/정렬 반영 상태로 수신
+    update_mode=GridUpdateMode.MODEL_CHANGED,            # 모델 변화 전체 이벤트
+    data_return_mode=DataReturnMode.FILTERED_AND_SORTED, # 필터/정렬 반영
     height=500,
     fit_columns_on_grid_load=True,
     key="main_grid",
 )
 
-# AgGrid에서 선택된 행 읽기 (객체/None 방어)
+# AgGrid 선택값 읽기 (안전 처리)
 try:
     rows = grid_response["selected_rows"] or []
 except Exception:
@@ -190,7 +178,7 @@ if rows:
     except Exception:
         pass
 
-# 차트용 심볼 드롭다운 (백업 경로도 겸함)
+# 차트용 심볼 드롭다운(백업 경로도 겸함)
 symbols = df_result["Symbol"].tolist()
 default_idx = 0
 if st.session_state.symbol_select in symbols:
