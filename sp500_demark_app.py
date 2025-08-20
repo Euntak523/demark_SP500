@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 # -----------------------------
 # 데이터/헬퍼
@@ -126,8 +126,8 @@ if st.button("전체 S&P 500 분석 시작"):
         df = pd.DataFrame(results).sort_values(by="MarketCap_RAW", ascending=False, na_position="last")
         st.session_state.df_result = df
         st.session_state.setup_results = results
-        st.success(f"총 {len(df)}개 종목이 Setup 완료 상태입니다.")
         st.session_state.symbol_select = df.iloc[0]["Symbol"]  # 기본 선택값
+        st.success(f"총 {len(df)}개 종목이 Setup 완료 상태입니다.")
 
 # 결과 표시
 if len(st.session_state.setup_results) == 0:
@@ -146,27 +146,42 @@ if df_result.empty:
     st.warning("필터 결과가 비어 있습니다.")
     st.stop()
 
-# 표 (AgGrid는 보기용, 선택 실패해도 드롭다운으로 차트 선택 가능)
+# 표 (AgGrid 선택 이벤트 안정화 구성)
 display_df = df_result.drop(columns=["MarketCap_RAW"])
 gb = GridOptionsBuilder.from_dataframe(display_df)
-gb.configure_selection(selection_mode="single", use_checkbox=True)
-gb.configure_grid_options(suppressRowClickSelection=False, rowSelection="single")
+
+# 체크박스 단일 선택 + 터치 대응
+gb.configure_selection(
+    selection_mode="single",
+    use_checkbox=True,
+    groupSelectsChildren=False,
+    groupSelectsFiltered=True,
+)
+# 고유 RowID를 심볼로 지정(선택 유지/전달 안정화)
+gb.configure_grid_options(
+    rowSelection="single",
+    suppressRowClickSelection=False,
+    getRowId="""function(params){ return params.data.Symbol; }"""
+)
 grid_options = gb.build()
 
 grid_response = AgGrid(
     display_df,
     gridOptions=grid_options,
-    update_mode=GridUpdateMode.VALUE_CHANGED | GridUpdateMode.SELECTION_CHANGED,
+    update_mode=GridUpdateMode.MODEL_CHANGED,                 # 모델 변화 전부 이벤트
+    data_return_mode=DataReturnMode.FILTERED_AND_SORTED,      # 필터/정렬 반영 상태로 수신
     height=500,
     fit_columns_on_grid_load=True,
-    key="main_grid"
+    key="main_grid",
 )
 
-# AgGrid 선택값이 잡히면 드롭다운 값 덮어쓰기 (가능한 경우만)
+# AgGrid에서 선택된 행 읽기 (객체/None 방어)
 try:
     rows = grid_response["selected_rows"] or []
 except Exception:
     rows = []
+
+# 그리드에서 선택되면 selectbox 기본값 갱신
 if rows:
     try:
         sym_from_grid = pd.DataFrame(rows).iloc[0].get("Symbol")
@@ -175,13 +190,13 @@ if rows:
     except Exception:
         pass
 
-# ✅ 차트용 심볼 드롭다운 (핵심)
+# 차트용 심볼 드롭다운 (백업 경로도 겸함)
 symbols = df_result["Symbol"].tolist()
 default_idx = 0
 if st.session_state.symbol_select in symbols:
     default_idx = symbols.index(st.session_state.symbol_select)
 
-selected_symbol = st.selectbox("차트 볼 심볼을 선택하세요:", symbols, index=default_idx)
+selected_symbol = st.selectbox("차트 볼 심볼:", symbols, index=default_idx)
 st.session_state.symbol_select = selected_symbol
 
 st.markdown(f"### {selected_symbol} 차트")
