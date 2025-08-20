@@ -134,10 +134,11 @@ if len(st.session_state.setup_results) > 0:
         fit_columns_on_grid_load=True
     )
 
-    # ✅ 안전한 선택 행 처리
-    rows = []
-    if isinstance(grid_response, dict):
-        rows = grid_response.get("selected_rows") or []
+    # ✅ AgGrid 선택행 안전 처리 (dict가 아니어도 동작)
+    try:
+        rows = grid_response["selected_rows"] or []
+    except Exception:
+        rows = []
 
     if rows:
         try:
@@ -150,6 +151,8 @@ if len(st.session_state.setup_results) > 0:
             else:
                 st.markdown(f"### {selected_symbol} 차트")
                 status, df, direction = current_demark_setup(selected_symbol)
+                # 디버깅이 필요하면 아래 주석을 해제:
+                # st.write("상태:", status, "shape:", None if df is None else df.shape)
 
                 if df is not None and not df.empty:
                     df['MA20'] = df['Close'].rolling(window=20).mean()
