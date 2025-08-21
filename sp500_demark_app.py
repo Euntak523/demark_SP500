@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # -----------------------------
 # 데이터/헬퍼
@@ -34,7 +34,7 @@ def current_demark_setup(symbol):
 
     setup_count = 0
     setup_index = 0
-    setup_direction = "하락"  # 현재 로직은 하락 Setup 기준
+    setup_direction = "하락"  # 현재 로직: 하락 Setup만 카운트
 
     for i in range(4, len(df)):
         try:
@@ -91,33 +91,33 @@ if "setup_results" not in st.session_state:
     st.session_state.setup_results = []
 if "df_result" not in st.session_state:
     st.session_state.df_result = pd.DataFrame()
-if "symbol_select" not in st.session_state:
-    st.session_state.symbol_select = None
 
-# 분석 실행
+# 1) 분석 실행
 if st.button("전체 S&P 500 분석 시작"):
     sp500_df = get_sp500_symbols()
     results = []
     with st.spinner("분석 중입니다..."):
         for _, row in sp500_df.iterrows():
-            sym = row['Symbol']; sector = row['GICS Sector']
+            sym = row['Symbol']
+            sector = row['GICS Sector']
             try:
                 status, df, direction = current_demark_setup(sym)
                 if "Setup 미완료" not in status and status != "데이터 부족":
-                    # (선택) 시총 – 실패해도 무시
+                    # (선택) 시총
+                    cap_raw, cap_str = None, None
                     try:
                         info = yf.Ticker(sym).info
-                        cap = info.get("marketCap")
-                        cap_str = f"{cap/1_000_000_000:.2f}B" if cap else None
+                        cap_raw = info.get("marketCap")
+                        cap_str = f"{cap_raw/1_000_000_000:.2f}B" if cap_raw else None
                     except Exception:
-                        cap, cap_str = None, None
+                        pass
                     results.append({
                         "Symbol": sym,
                         "Status": status,
                         "Direction": direction,
                         "Sector": sector,
                         "MarketCap": cap_str,
-                        "MarketCap_RAW": cap
+                        "MarketCap_RAW": cap_raw
                     })
             except Exception:
                 continue
@@ -126,10 +126,9 @@ if st.button("전체 S&P 500 분석 시작"):
         df = pd.DataFrame(results).sort_values(by="MarketCap_RAW", ascending=False, na_position="last")
         st.session_state.df_result = df
         st.session_state.setup_results = results
-        st.session_state.symbol_select = df.iloc[0]["Symbol"]  # 기본 선택
         st.success(f"총 {len(df)}개 종목이 Setup 완료 상태입니다.")
 
-# 결과 표시
+# 2) 결과 표 + 선택 → 차트
 if len(st.session_state.setup_results) == 0:
     st.warning("Setup 완료된 종목이 없습니다.")
     st.stop()
@@ -146,46 +145,38 @@ if df_result.empty:
     st.warning("필터 결과가 비어 있습니다.")
     st.stop()
 
-# 표 (AgGrid – 문제 옵션 모두 제거, 최소 구성)
+# --- AgGrid (최소 옵션: 행 클릭 이벤트만) ---
 display_df = df_result.drop(columns=["MarketCap_RAW"])
 gb = GridOptionsBuilder.from_dataframe(display_df)
-gb.configure_selection(selection_mode="single", use_checkbox=True)   # 체크박스 단일 선택
+gb.configure_selection(selection_mode="single", use_checkbox=False)  # 행 클릭으로 선택
 gb.configure_grid_options(rowSelection="single", suppressRowClickSelection=False)
 grid_options = gb.build()
 
 grid_response = AgGrid(
     display_df,
     gridOptions=grid_options,
-    update_mode=GridUpdateMode.MODEL_CHANGED,            # 모델 변화 전체 이벤트
-    data_return_mode=DataReturnMode.FILTERED_AND_SORTED, # 필터/정렬 반영
+    update_mode=GridUpdateMode.SELECTION_CHANGED,  # 선택 변화에만 반응(가장 안정적)
     height=500,
     fit_columns_on_grid_load=True,
-    key="main_grid",
+    key="main_grid"
 )
 
-# AgGrid 선택값 읽기 (안전 처리)
+# 선택된 심볼 (표 → 우선, 없으면 드롭다운)
+selected_symbol_from_grid = None
 try:
-    rows = grid_response["selected_rows"] or []
+    sel_rows = grid_response["selected_rows"] or []
+    if sel_rows:
+        selected_symbol_from_grid = pd.DataFrame(sel_rows).iloc[0].get("Symbol")
 except Exception:
-    rows = []
+    pass
 
-# 그리드에서 선택되면 selectbox 기본값 갱신
-if rows:
-    try:
-        sym_from_grid = pd.DataFrame(rows).iloc[0].get("Symbol")
-        if sym_from_grid:
-            st.session_state.symbol_select = sym_from_grid
-    except Exception:
-        pass
-
-# 차트용 심볼 드롭다운(백업 경로도 겸함)
 symbols = df_result["Symbol"].tolist()
-default_idx = 0
-if st.session_state.symbol_select in symbols:
-    default_idx = symbols.index(st.session_state.symbol_select)
+default_index = 0
+if selected_symbol_from_grid in symbols:
+    default_index = symbols.index(selected_symbol_from_grid)
 
-selected_symbol = st.selectbox("차트 볼 심볼:", symbols, index=default_idx)
-st.session_state.symbol_select = selected_symbol
+# 백업 경로: 드롭다운에서도 선택 가능
+selected_symbol = st.selectbox("차트 볼 심볼:", symbols, index=default_index)
 
 st.markdown(f"### {selected_symbol} 차트")
 draw_chart(selected_symbol)
